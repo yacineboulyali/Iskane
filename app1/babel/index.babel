@@ -1,0 +1,303 @@
+// ---- Classes ---- 
+class Mesh extends THREE.Object3D {
+  constructor(options) {
+    super();
+
+    this.radius = options.radius;
+    this.resolution = options.resolution;
+    this.tetaOffset = options.tetaOffset;
+    this.color = options.color;
+    this.waveNumber = options.waveNumber;
+    this.waveType = options.waveType;
+    this.waveLength = options.waveLength;
+    this.waveHeight = 0.1 * this.radius;
+    this.lineWidth = 3;
+
+    this.count = 0;
+    this.speed = 0.05;
+
+    this.geom = new THREE.Geometry();
+    this.mat = new THREE.LineBasicMaterial({
+      color: this.color,
+      linewidth: this.lineWidth
+    });
+
+    this.mesh = new THREE.Line(this.geom, this.mat);
+
+    this.update();
+
+    this.add(this.mesh);
+  }
+
+  update(audioData) {
+    this.count += this.speed;
+    this.scale.set(audioData * 2, audioData * 2, audioData * 2);
+
+    const newVertices = [];
+
+    for (let i = 0; i <= this.resolution; i++) {
+      const teta = Math.PI / 180 * (i + this.tetaOffset);
+      const smoothingAmount = 0.14;
+      let smoothPercent = 1;
+      let deltaRadius = 0;
+
+      if (i < this.waveLength * this.resolution || i == this.resolution) {
+        const smoothing_amount = 0.14;
+        let smoothPercent = 1;
+
+        if (i < this.waveLength * this.resolution * smoothing_amount)
+          smoothPercent = i / (this.waveLength * this.resolution * smoothing_amount);
+        else if (i > this.waveLength * this.resolution * (1 - smoothing_amount) && i <= this.waveLength * this.resolution)
+          smoothPercent = (this.waveLength * this.resolution - i) / (this.waveLength * this.resolution * smoothing_amount);
+        else if (i == this.resolution)
+          smoothPercent = 0;
+
+        if (this.waveType == 'bass')
+          deltaRadius = this.waveHeight * smoothPercent * Math.sin((teta + this.count) * this.waveNumber) * audioData * 5;
+        else if (this.waveType == 'medium')
+          deltaRadius = this.waveHeight * smoothPercent * Math.cos((teta + this.count) * this.waveNumber) * audioData * 5;
+        else if (this.waveType == 'treble')
+          deltaRadius = this.waveHeight * smoothPercent * Math.cos((teta + Math.PI / 180 * 45 + this.count) * this.waveNumber) * audioData * 5;
+      }
+
+      const x = (this.radius + deltaRadius) * Math.cos(teta + this.count);
+      const y = (this.radius + deltaRadius) * Math.sin(teta + this.count);
+      const z = 0;
+
+      newVertices.push(new THREE.Vector3(x, y, z));
+    }
+
+    this.mesh.geometry.vertices = newVertices;
+    this.mesh.geometry.verticesNeedUpdate = true;
+    this.mesh.geometry.dynamic = true;
+  }
+}
+
+class AudioW {
+  constructor(sepValue) {
+    let self = this;
+
+    this.audio = new Audio();
+    this.audio.crossOrigin = "anonymous";
+    this.audio.src = 'http://lab.hengpatrick.fr/2016/three-js-circle-sin-audio/tdcc.mp3';
+    this.audio.crossOrigin = "anonymous";
+    this.audio.controls = false;
+    this.audio.loop = true;
+    this.audio.autoplay = true;
+
+    this.ctx = new AudioContext();
+    this.audioSrc = this.ctx.createMediaElementSource(this.audio);
+    this.analyser = this.ctx.createAnalyser();
+    this.audioData = [];
+    this.sepValue = sepValue;
+
+    // Connect the MediaElementSource with the analyser
+    this.audioSrc.connect(this.analyser);
+    this.audioSrc.connect(this.ctx.destination);
+
+    // FrequencyBinCount tells how many values are receive from the analyser
+    this.frequencyData = new Uint8Array(this.analyser.frequencyBinCount);
+
+    this.audio.play();
+  };
+
+  getFrequencyData() {
+    this.analyser.getByteFrequencyData(this.frequencyData);
+    return this.frequencyData;
+  };
+
+  getAudioData() {
+    this.analyser.getByteFrequencyData(this.frequencyData);
+
+    // Split array into 3
+    let frequencyArray = this.splitFrenquencyArray(this.frequencyData,
+      this.sepValue);
+
+    // Make average of frenquency array entries
+    for (let i = 0; i < frequencyArray.length; i++) {
+      let average = 0;
+
+      for (let j = 0; j < frequencyArray[i].length; j++) {
+        average += frequencyArray[i][j];
+      }
+      this.audioData[i] = (average / frequencyArray[i].length) / 255;
+    }
+    return this.audioData;
+  }
+
+  splitFrenquencyArray(arr, n) {
+    let tab = Object.keys(arr).map(function(key) {
+      return arr[key]
+    });
+    let len = tab.length,
+      result = [],
+      i = 0;
+
+    while (i < len) {
+      let size = Math.ceil((len - i) / n--);
+      result.push(tab.slice(i, i + size));
+      i += size;
+    }
+
+    return result;
+  }
+};
+
+class Webgl {
+  constructor(width, height, audio) {
+    this.audio = audio;
+
+    this.scene = new THREE.Scene();
+
+    this.camera = new THREE.PerspectiveCamera(50, width / height, 1, 1000);
+    this.camera.position.set(0, 0, 20);
+
+    this.renderer = new THREE.WebGLRenderer({
+      antialias: true,
+      alpha: true
+    });
+    this.renderer.setSize(width, height);
+    this.renderer.setClearColor(0x151515);
+
+    this.waves = [];
+
+    this.waves[0] = new Mesh({
+      radius: 5,
+      resolution: 360,
+      color: 0xff418f,
+      waveNumber: 10,
+      tetaOffset: 0,
+      waveLength: 1,
+      waveType: 'bass'
+    });
+
+    this.waves[1] = new Mesh({
+      radius: 5,
+      resolution: 160,
+      color: 0x51d4d4,
+      waveNumber: 100,
+      tetaOffset: 120,
+      waveLength: 1,
+      waveType: 'medium'
+    });
+
+    this.waves[2] = new Mesh({
+      radius: 5,
+      resolution: 360,
+      color: 0x8e44ad,
+      waveNumber: 50,
+      tetaOffset: 245,
+      waveLength: 1,
+      waveType: 'treble'
+    });
+
+    for (var i = 0; i < this.waves.length; i++) {
+      this.waves[i].position.set(0, 0, 0);
+      this.scene.add(this.waves[i]);
+    }
+  }
+
+  resize(width, height) {
+    this.camera.aspect = width / height;
+    this.camera.updateProjectionMatrix();
+
+    this.renderer.setSize(width, height);
+  };
+
+  render() {
+    this.renderer.autoClear = false;
+    this.renderer.clear();
+    this.renderer.render(this.scene, this.camera);
+    const audioData = this.audio.getAudioData();
+
+    for (let i = 0; i < this.waves.length; i++) {
+      this.waves[i].update(audioData[i]);
+    }
+  }
+}
+
+// ---- Main ---- 
+let webgl;
+let audio;
+let gui;
+let stats;
+
+audio = new AudioW(3);
+webgl = new Webgl(window.innerWidth, window.innerHeight,
+  audio);
+
+document.body.appendChild(webgl.renderer.domElement);
+
+// GUI settings
+gui = new dat.GUI();
+
+gui.add(webgl.camera.position, 'z').min(0).max(30).step(0.1).name('Camera Zoom');
+
+const radiusFolder = gui.addFolder('Radius');
+const waveFolder = gui.addFolder('Waves Number');
+const colorFolder = gui.addFolder('Colors');
+
+radiusFolder.add(webgl.waves[0], 'radius').min(0).max(10).step(0.1).name('Bass radius');
+radiusFolder.add(webgl.waves[1], 'radius').min(0).max(10).step(0.1).name('Medium radius');
+radiusFolder.add(webgl.waves[2], 'radius').min(0).max(10).step(0.1).name('Treble radius');
+
+waveFolder.add(webgl.waves[0], 'waveNumber').min(0).max(200).step(1).name('Bass waves');
+waveFolder.add(webgl.waves[1], 'waveNumber').min(0).max(200).step(1).name('Medium waves');
+waveFolder.add(webgl.waves[2], 'waveNumber').min(0).max(200).step(1).name('Treble waves');
+
+colorFolder.addColor(webgl.waves[0], 'color').onChange(function() {
+    webgl.waves[0].mat.color.setHex(dec2hex(webgl.waves[0].color));
+}).name('Bass color');
+colorFolder.addColor(webgl.waves[1], 'color').onChange(function() {
+    webgl.waves[1].mat.color.setHex(dec2hex(webgl.waves[1].color));
+}).name('Medium color');
+colorFolder.addColor(webgl.waves[2], 'color').onChange(function() {
+    webgl.waves[2].mat.color.setHex(dec2hex(webgl.waves[2].color));
+}).name('Treble color');
+
+//Stats js
+stats = new Stats();
+stats.setMode(0); // 0: fps, 1: ms
+
+stats.domElement.style.position = 'absolute';
+stats.domElement.style.left = '0px';
+stats.domElement.style.top = '0px';
+
+document.body.appendChild(stats.domElement);
+
+window.onresize = resizeHandler;
+
+animate();
+
+
+function resizeHandler() {
+  webgl.resize(window.innerWidth, window.innerHeight);
+}
+
+function animate() {
+  stats.begin();
+  requestAnimationFrame(animate);
+  webgl.render();
+  stats.end();
+}
+
+// Dec2Hex for setting colors
+function dec2hex(i) {
+    var result = "0x000000";
+    if (i >= 0 && i <= 15) {
+        result = "0x00000" + i.toString(16);
+    } else if (i >= 16 && i <= 255) {
+        result = "0x0000" + i.toString(16);
+    } else if (i >= 256 && i <= 4095) {
+        result = "0x000" + i.toString(16);
+    } else if (i >= 4096 && i <= 65535) {
+        result = "0x00" + i.toString(16);
+    } else if (i >= 65535 && i <= 1048575) {
+        result = "0x0" + i.toString(16);
+    } else if (i >= 1048575) {
+        result = '0x' + i.toString(16);
+    }
+    if (result.length == 8) {
+        return result;
+    }
+}
